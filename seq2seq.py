@@ -4,8 +4,8 @@ import tensorflow as tf
 from pprint import pprint
 from tensorflow.python.layers.core import Dense
 from tensorflow.contrib.seq2seq import ScheduledOutputTrainingHelper, BasicDecoder
-from helpers import InferenceHelper
-from model import TensorflowModel
+from .helpers import InferenceHelper
+from .base import TensorflowModel
 
 
 
@@ -22,8 +22,10 @@ class Sequence2Sequence(TensorflowModel):
         @num_layers: The number of rnn layers
         @num_features: The size of the feature vector that is passed in at each timestep
         """
+        super().__init__()
         self.create_model_inputs(num_features)
         self.create_model(num_features, rnn_size, num_layers)
+        self.create_saver()
 
 
 
@@ -205,4 +207,7 @@ class TrainableSequence2Sequence(Sequence2Sequence):
 
         # Return the output from the inference decoder
         return sess.run(self.inference_decoder_output, feed_dict=feed)
+
+
+
 

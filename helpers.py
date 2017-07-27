@@ -3,7 +3,6 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.layers.core import Dense
 from tensorflow.contrib.seq2seq import CustomHelper
-from model import TensorflowModel
 
 
 
