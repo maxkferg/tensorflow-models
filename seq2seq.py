@@ -15,7 +15,7 @@ class Sequence2Sequence(TensorflowModel):
     dense input and dense output vectors
     """
 
-    def __init__(self, rnn_size, num_layers, num_features):
+    def __init__(self, rnn_size, num_layers, num_features, **kwargs):
         """
         Build the model
         @rnn_size: The number of hidden units in each layer
@@ -23,21 +23,30 @@ class Sequence2Sequence(TensorflowModel):
         @num_features: The size of the feature vector that is passed in at each timestep
         """
         super().__init__()
-        self.create_model_inputs(num_features)
+        self.create_model_inputs(num_features, **kwargs)
         self.create_model(num_features, rnn_size, num_layers)
         self.create_saver()
 
 
 
-    def create_model_inputs(self, num_features):
-        """Create all of the palceholders"""
-        self.input_data = tf.placeholder(tf.float32, [None, None, num_features], name='input')
-        self.targets = tf.placeholder(tf.float32, [None, None, num_features], name='targets')
+    def create_model_inputs(self, num_features, **kwargs):
+        """
+        Create all of the placeholders
+        Uses tensors specified in **kwargs is available
+        """
+        if len(kwargs):
+          self.input_data = kwargs["sources_batch"]
+          self.targets = kwargs["targets_batch"]
+          self.target_sequence_length = kwargs["targets_lengths"]
+          self.source_sequence_length = kwargs["sources_lengths"]
+        else:
+          self.input_data = tf.placeholder(tf.float32, [None, None, num_features], name='input')
+          self.targets = tf.placeholder(tf.float32, [None, None, num_features], name='targets')
+          self.target_sequence_length = tf.placeholder(tf.int32, (None,), name='target_sequence_length')
+          self.source_sequence_length = tf.placeholder(tf.int32, (None,), name='source_sequence_length')
+        # Always just calculate these
         self.lr = tf.placeholder(tf.float32, name='learning_rate')
-
-        self.target_sequence_length = tf.placeholder(tf.int32, (None,), name='target_sequence_length')
         self.max_target_sequence_length = tf.reduce_max(self.target_sequence_length, name='max_target_len')
-        self.source_sequence_length = tf.placeholder(tf.int32, (None,), name='source_sequence_length')
 
 
 
@@ -170,43 +179,70 @@ class TrainableSequence2Sequence(Sequence2Sequence):
       self.train_op = optimizer.apply_gradients(capped_gradients)
 
 
-    def train(self, sess, sources_batch, targets_batch, learning_rate, targets_lengths, sources_lengths):
+
+    def train(self, sess, learning_rate, sources_batch=None, targets_batch=None, targets_lengths=None, sources_lengths=None):
         """Train the model on a batch of data"""
-        # Feed
-        feed = { self.input_data: sources_batch,
-                 self.targets: targets_batch,
-                 self.lr: learning_rate,
-                 self.target_sequence_length: targets_lengths,
-                 self.source_sequence_length: sources_lengths
-              }
+        feed = { self.lr: learning_rate }
+
+        if sources_batch:
+          feed[self.input_data] = sources_batch
+
+        if targets_batch:
+          feed[self.targets] = targets_batch
+
+        if targets_lengths:
+          feed[self.target_sequence_length] = targets_lengths
+
+        if sources_lengths:
+          feed[self.source_sequence_length] = sources_lengths
 
         # Run gradient descent on this batch
         _, loss = sess.run([self.train_op, self.train_loss_op], feed_dict=feed)
         return loss
 
 
-    def evaluate(self, sess, sources_batch, targets_batch, learning_rate, targets_lengths, sources_lengths):
+
+    def evaluate(self, sess, sources_batch=None, targets_batch=None, targets_lengths=None, sources_lengths=None):
         """Evaluate the model on a batch of data. Return the loss on sources_batch"""
-        # Feed
-        feed = { self.input_data: sources_batch,
-                 self.targets: targets_batch,
-                 self.target_sequence_length: targets_lengths,
-                 self.source_sequence_length: sources_lengths
-              }
+        feed = {}
+
+        if sources_batch:
+          feed[self.input_data] = sources_batch
+
+        if targets_batch:
+          feed[self.targets] = targets_batch
+
+        if targets_lengths:
+          feed[self.target_sequence_length] = targets_lengths
+
+        if sources_lengths:
+          feed[self.source_sequence_length] = sources_lengths
 
         return sess.run([self.train_loss_op, self.eval_loss_op], feed_dict=feed)
 
 
-    def predict(self, sess, sources_batch, targets_lengths, sources_lengths):
-        """Return the predictions for a set of sources"""
-        # Feed
-        feed = { self.input_data: sources_batch,
-                 self.target_sequence_length: targets_lengths,
-                 self.source_sequence_length: sources_lengths
-               }
 
-        # Return the output from the inference decoder
-        return sess.run(self.inference_decoder_output, feed_dict=feed)
+    def predict(self, sess, sources_batch=None, targets_lengths=None, sources_lengths=None):
+        """Return the predictions for a set of sources"""
+        feed = {}
+
+        if sources_batch:
+          feed[self.input_data] = sources_batch
+
+        if targets_lengths:
+          feed[self.target_sequence_length] = targets_lengths
+
+        if sources_lengths:
+          feed[self.source_sequence_length] = sources_lengths
+
+        # Return all the data tensors
+        outputs = [
+          self.input_data,
+          self.targets,
+          self.inference_decoder_output
+        ]
+
+        return sess.run(outputs, feed_dict=feed)
 
 
 
