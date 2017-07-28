@@ -25,9 +25,9 @@ class Sequence2Sequence(TensorflowModel):
         super().__init__()
         self.create_model_inputs(num_features, **kwargs)
         self.create_model(num_features, rnn_size, num_layers)
+        self.create_optimizer()
         self.create_writer(logs_path)
         self.create_saver()
-
 
 
     def create_model_inputs(self, num_features, **kwargs):
@@ -61,6 +61,12 @@ class Sequence2Sequence(TensorflowModel):
         # Store the two output heads
         self.training_decoder_output = training_dec_out
         self.inference_decoder_output = inference_dec_out
+
+
+
+    def create_optimizer(self):
+      """Overide in child class"""
+      raise NotImplementedError
 
 
 
@@ -170,8 +176,10 @@ class TrainableSequence2Sequence(Sequence2Sequence):
     A sequence to sequence model that can be trained and evaluated
     """
 
-    def __init__(self,*args,**kwargs):
-      super().__init__(*args,**kwargs)
+    def create_optimizer(self):
+      """
+      Overide default method to create optimiser operations
+      """
 
       # Define two immportant loss ops
       self.train_loss_op = tf.nn.l2_loss(self.targets - self.training_decoder_output)
@@ -182,8 +190,9 @@ class TrainableSequence2Sequence(Sequence2Sequence):
 
       # Gradient clipping
       gradients, v = zip(*optimizer.compute_gradients(self.train_loss_op))
-      clipped_gradients, _ = tf.clip_by_global_norm(gradients, 10.0)
-      self.grad_norm = tf.global_norm(clipped_gradients)
+      clipped_gradients, _ = tf.clip_by_global_norm(gradients, 20.0)
+      self.grad_norm_clipped = tf.global_norm(clipped_gradients)
+      self.grad_norm_unclipped = tf.global_norm(gradients)
 
       # Training operation
       self.train_op = optimizer.apply_gradients(zip(gradients, v))
@@ -205,10 +214,12 @@ class TrainableSequence2Sequence(Sequence2Sequence):
         tf.summary.scalar('max', tf.reduce_max(var))
         tf.summary.scalar('min', tf.reduce_min(var))
 
+
     def create_variable_summaries(self):
       """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
       with tf.name_scope('summaries'):
-        tf.summary.scalar('grad_norm', self.grad_norm)
+        tf.summary.scalar('grad_norm_clipped', self.grad_norm_clipped)
+        tf.summary.scalar('grad_norm_unclipped', self.grad_norm_unclipped)
         tf.summary.scalar('train_loss', tf.reduce_min(self.train_loss_op))
         tf.summary.scalar('eval_loss', tf.reduce_min(self.eval_loss_op))
 
