@@ -20,6 +20,7 @@ class TensorflowModel:
     def __init__(self):
         self.loss = None
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
+        self.global_step_op = tf.assign_add(self.global_step, 1, name='increment_global_step')
 
     def get_training_outputs(self):
         """Return the training output tensors"""
@@ -57,6 +58,14 @@ class TensorflowModel:
         Must be called after all the variables have been created
         """
         self.saver = tf.train.Saver()
+
+
+    def create_writer(self, logs_path=None):
+        """
+        Create a writer object.
+        Must be called after all the variables have been created
+        """
+        self.writer = tf.summary.FileWriter(logs_path, graph=tf.get_default_graph())
 
 
     def save(self, sess, directory, name, step):

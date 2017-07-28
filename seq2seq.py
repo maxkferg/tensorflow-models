@@ -15,7 +15,7 @@ class Sequence2Sequence(TensorflowModel):
     dense input and dense output vectors
     """
 
-    def __init__(self, rnn_size, num_layers, num_features, **kwargs):
+    def __init__(self, rnn_size, num_layers, num_features, logs_path, **kwargs):
         """
         Build the model
         @rnn_size: The number of hidden units in each layer
@@ -25,6 +25,7 @@ class Sequence2Sequence(TensorflowModel):
         super().__init__()
         self.create_model_inputs(num_features, **kwargs)
         self.create_model(num_features, rnn_size, num_layers)
+        self.create_writer(logs_path)
         self.create_saver()
 
 
@@ -158,6 +159,12 @@ class Sequence2Sequence(TensorflowModel):
 
 
 
+        # Create the training operation by calling optimizer.apply_gradients
+        train_op = optimizer.apply_gradients(zip(gradients, v))
+
+
+
+
 class TrainableSequence2Sequence(Sequence2Sequence):
     """
     A sequence to sequence model that can be trained and evaluated
@@ -172,15 +179,50 @@ class TrainableSequence2Sequence(Sequence2Sequence):
 
       # Adam optimiser with gradient clipping
       optimizer = tf.train.AdamOptimizer(self.lr)
-      gradients = optimizer.compute_gradients(self.train_loss_op)
-      capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
+
+      # Gradient clipping
+      gradients, v = zip(*optimizer.compute_gradients(self.train_loss_op))
+      clipped_gradients, _ = tf.clip_by_global_norm(gradients, 10.0)
+      self.grad_norm = tf.global_norm(clipped_gradients)
 
       # Training operation
-      self.train_op = optimizer.apply_gradients(capped_gradients)
+      self.train_op = optimizer.apply_gradients(zip(gradients, v))
+
+      # Create gradient summaries
+      for i in range(0,2):
+        with tf.name_scope('gradient-%i'%i):
+          self.create_variable_summary(gradients[i], "unclipped")
+          self.create_variable_summary(clipped_gradients[i], "clipped")
+
+      # Create all the summaries for tensorboard
+      self.create_variable_summaries()
 
 
+    def create_variable_summary(self, var, name):
+      """Create a variable summary for a single variable"""
+      with tf.name_scope(name):
+        tf.summary.scalar('mean', tf.reduce_mean(var))
+        tf.summary.scalar('max', tf.reduce_max(var))
+        tf.summary.scalar('min', tf.reduce_min(var))
 
-    def train(self, sess, learning_rate, sources_batch=None, targets_batch=None, targets_lengths=None, sources_lengths=None):
+    def create_variable_summaries(self):
+      """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
+      with tf.name_scope('summaries'):
+        tf.summary.scalar('grad_norm', self.grad_norm)
+        tf.summary.scalar('train_loss', tf.reduce_min(self.train_loss_op))
+        tf.summary.scalar('eval_loss', tf.reduce_min(self.eval_loss_op))
+
+        # Merge all the test summaries
+        self.test_summaries = tf.summary.merge_all()
+
+        # Define additional train summaries
+        tf.summary.scalar('learning_rate', self.lr)
+
+        # Merge all train summaries
+        self.train_summaries = tf.summary.merge_all()
+
+
+    def train(self, sess, learning_rate, summarize=False, sources_batch=None, targets_batch=None, targets_lengths=None, sources_lengths=None):
         """Train the model on a batch of data"""
         feed = { self.lr: learning_rate }
 
@@ -196,8 +238,21 @@ class TrainableSequence2Sequence(Sequence2Sequence):
         if sources_lengths:
           feed[self.source_sequence_length] = sources_lengths
 
-        # Run gradient descent on this batch
-        _, loss = sess.run([self.train_op, self.train_loss_op], feed_dict=feed)
+        if summarize:
+          # Run the training operation and collect variable summaries
+          ops = [self.train_op, self.global_step_op, self.train_loss_op, self.train_summaries]
+
+          _, step, loss, summary = sess.run(ops, feed_dict=feed)
+
+          self.writer.add_summary(summary, step)
+
+        else:
+          # Run the training operation without summaries
+          ops = [self.train_op, self.global_step_op, self.train_loss_op]
+
+          # Run gradient descent on this batch
+          _, step, loss = sess.run(ops, feed_dict=feed)
+
         return loss
 
 
@@ -218,7 +273,15 @@ class TrainableSequence2Sequence(Sequence2Sequence):
         if sources_lengths:
           feed[self.source_sequence_length] = sources_lengths
 
-        return sess.run([self.train_loss_op, self.eval_loss_op], feed_dict=feed)
+        i = tf.train.global_step(sess, self.global_step)
+
+        # Define the operations we want to run
+        ops = [self.train_loss_op, self.eval_loss_op, self.test_summaries]
+
+        # Evaluate the model without training
+        train_loss, eval_loss, summary = sess.run(ops, feed_dict=feed)
+
+        return train_loss, eval_loss
 
 
 
